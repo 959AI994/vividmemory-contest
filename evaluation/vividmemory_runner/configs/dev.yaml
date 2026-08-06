@@ -1,0 +1,14 @@
+# Dev config — small subset for fast iteration.
+# Runs 3 LoCoMo conversations. Answer + judge are stubs (Phase 0.2 skeleton
+# only ships ingest → search → proxy).
+adapter_base_url: http://localhost:8000
+top_k: 10
+add_concurrency: 4
+search_concurrency: 8
+request_timeout_seconds: 300.0
+
+datasets:
+  - name: locomo
+    path: benchmarks/locomo/data/locomo10.json
+    max_conversations: 3
+    max_questions_per_conversation: 20
