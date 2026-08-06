@@ -57,6 +57,40 @@ def format_conversation_document(
     return body
 
 
+def format_message_documents(
+    *,
+    messages: list[Message],
+    request_id: str,
+    session_id: str,
+) -> list[tuple[str, str, str | None]]:
+    """One retain document per non-empty message.
+
+    Returns list of (document_id, content, timestamp_iso). Document IDs are
+    deterministic: f"{request_id}:msg:{index}" using the ORIGINAL position in
+    the messages array (indexing counts empty messages, so re-sends with the
+    same payload get the same IDs).
+    """
+    docs: list[tuple[str, str, str | None]] = []
+    for idx, msg in enumerate(messages):
+        content = (msg.content or "").strip()
+        if not content:
+            continue
+        role = (msg.role or "user").strip() or "user"
+        ts = _ms_to_iso(msg.timestamp)
+        doc_id = f"{request_id}:msg:{idx}"
+        header_lines = [
+            f"request_id: {request_id}",
+            f"session_id: {session_id}",
+            "",
+        ]
+        body_line = f"{role} ({ts}): {content}" if ts else f"{role}: {content}"
+        body = "\n".join(header_lines + [body_line]).strip()
+        docs.append((doc_id, body, ts))
+    if not docs:
+        raise ValueError("messages must contain at least one non-empty content field")
+    return docs
+
+
 def build_recall_query(query: str, options: list[str] | None, *, include_options: bool) -> str:
     q = (query or "").strip()
     if not include_options or not options:

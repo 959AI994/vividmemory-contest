@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -12,6 +13,7 @@ from .client import (
     VividMemoryClient,
     build_recall_query,
     format_conversation_document,
+    format_message_documents,
     user_to_bank_id,
 )
 from .schemas import AddRequest, AddResponse, SearchRequest, SearchResponse, SearchResultItem
@@ -73,7 +75,6 @@ async def health(request: Request) -> JSONResponse:
 
 @app.post("/add", response_model=AddResponse)
 async def add_memories(body: AddRequest, request: Request) -> AddResponse:
-    """Persist contest messages via synchronous retain."""
     if not body.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
@@ -81,31 +82,48 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
     bank_id = user_to_bank_id(body.user_id)
 
     try:
-        content = format_conversation_document(
-            messages=body.messages,
-            request_id=body.request_id,
-            session_id=body.session_id,
-        )
+        if settings.per_message_retain:
+            documents = format_message_documents(
+                messages=body.messages,
+                request_id=body.request_id,
+                session_id=body.session_id,
+            )
+        else:
+            content = format_conversation_document(
+                messages=body.messages,
+                request_id=body.request_id,
+                session_id=body.session_id,
+            )
+            timestamps = [m.timestamp for m in body.messages if m.timestamp is not None]
+            latest_ts_iso = None
+            if timestamps:
+                from datetime import datetime, timezone
+                latest_ms = max(timestamps)
+                latest_ts_iso = datetime.fromtimestamp(
+                    latest_ms / 1000.0, tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            documents = [(body.request_id, content, latest_ts_iso)]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Prefer the latest message timestamp as the document event time.
-    timestamps = [m.timestamp for m in body.messages if m.timestamp is not None]
-    timestamp_iso = None
-    if timestamps:
-        from datetime import datetime, timezone
+    semaphore = asyncio.Semaphore(settings.retain_concurrency)
+    vm = _vm(request)
 
-        latest_ms = max(timestamps)
-        timestamp_iso = datetime.fromtimestamp(latest_ms / 1000.0, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async def _one(doc_id: str, doc_content: str, ts_iso: str | None) -> None:
+        async with semaphore:
+            await vm.retain_document(
+                bank_id=bank_id,
+                content=doc_content,
+                document_id=doc_id,
+                session_id=body.session_id,
+                timestamp_iso=ts_iso,
+            )
 
     try:
-        await _vm(request).retain_document(
-            bank_id=bank_id,
-            content=content,
-            document_id=body.request_id,
-            session_id=body.session_id,
-            timestamp_iso=timestamp_iso,
-        )
+        await asyncio.gather(*(
+            _one(doc_id, doc_content, ts_iso)
+            for doc_id, doc_content, ts_iso in documents
+        ))
     except httpx.HTTPStatusError as exc:
         logger.exception("retain HTTP error")
         raise HTTPException(
@@ -119,7 +137,6 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
         logger.exception("retain unexpected error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    _ = settings  # reserved for future adapter knobs
     return AddResponse(
         success=True,
         request_id=body.request_id,

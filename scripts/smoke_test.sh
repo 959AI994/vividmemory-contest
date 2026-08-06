@@ -146,4 +146,35 @@ curl -fsS -X POST "${BASE_URL}/search" -H 'Content-Type: application/json' -d "{
 }" | tee /tmp/vm_t_past.json
 echo
 
+echo "== per-message retain (flag on only) =="
+if [ "${ADAPTER_PER_MESSAGE_RETAIN:-false}" = "true" ]; then
+  TS_A=1704067200000
+  TS_B=1706745600000
+  TS_C=1709251200000
+  USER_C="eval:${RUN_ID}:user-c"
+  curl -fsS -X POST "${BASE_URL}/add" -H 'Content-Type: application/json' -d "{
+    \"request_id\": \"eval:${RUN_ID}:chunk-permsg\",
+    \"messages\": [
+      {\"role\":\"user\",\"timestamp\":${TS_A},\"content\":\"I started at Google.\"},
+      {\"role\":\"user\",\"timestamp\":${TS_B},\"content\":\"I moved to Apple.\"},
+      {\"role\":\"user\",\"timestamp\":${TS_C},\"content\":\"Now I work at Meta.\"}
+    ],
+    \"user_id\": \"${USER_C}\",
+    \"session_id\": \"${SESSION}\"
+  }" >/tmp/vm_permsg_add.json
+  EARLY_OUT=$(curl -fsS -X POST "${BASE_URL}/search" -H 'Content-Type: application/json' -d "{
+    \"query\": \"When did I start at Google?\",
+    \"user_id\": \"${USER_C}\",
+    \"top_k\": 10
+  }")
+  echo "${EARLY_OUT}" | tee /tmp/vm_permsg_early.json
+  echo "${EARLY_OUT}" | grep -qi 'Google' || {
+    echo "FAIL: per-message retain earliest fact not found"
+    exit 1
+  }
+  echo "per-message retain: earliest fact ok"
+else
+  echo "per-message retain skipped (flag off)"
+fi
+
 echo "SMOKE TEST PASSED"
