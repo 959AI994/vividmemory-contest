@@ -38,20 +38,67 @@ the contest adapter and engine wiring — without rewriting the core.
 
 ## 5. Baseline configuration
 
-- Branch commit: `f2ba8c8` (Phase 0.2 runner skeleton) — pending baseline run
+- Branch commit: `2f0c690` (Phase 6 docs) — first end-to-end measurement below
 - Adapter flags: all defaults (see `.env.example`)
-- LLM: `gpt-4o-mini` (or gateway equivalent per `.env`)
-- Embed: `text-embedding-3-small`
+- LLM: OpenAI-compatible gateway (`deepseek-v4-pro` via local dev endpoint) — labeled **[local-dev, deepseek-v4-pro]**
+- Embed: `onnx` (bge-small default; downloaded on first run)
 - Rerank: `rrf` (passthrough)
+- Runner config: `evaluation/vividmemory_runner/configs/dev.yaml`
+  (3 LoCoMo conversations × 20 questions each = 60 queries; only LoCoMo has an adapter today)
 
 ## 6. Baseline results
 
-_Pending. Populated after running:_
+**Run:** `dev_baseline_20260806_204940` (LoCoMo dev subset, defaults, no experimental flags)
+
+Ingest (3 conversations, single-doc mode, `ADAPTER_RETAIN_CONCURRENCY=4`):
+
+| conv_id | turns | status | ingest seconds |
+|---|---|---|---|
+| conv-30 | 369 | ok | 165.4 |
+| conv-41 | 663 | ok | 368.1 |
+| conv-26 | 419 | ok | 388.3 |
+| **mean** | 484 | **3/3 ok** | **307.3** |
+
+Search (60 queries, all returned `data`, 0 errors):
+
+- `search_p50_seconds`: **0.702**
+- `search_p95_seconds`: **1.012**
+
+Proxy metric (substring OR Jaccard≥0.5 recall@10 vs LoCoMo evidence texts):
+
+- **`mean_recall_at_k` = 0.000** (0 of 60 queries hit).
+
+**Interpretation.** The proxy is intentionally cheap and strict. LoCoMo `evidence`
+strings are raw conversational quotes (e.g. `"Lost my job as a banker yesterday…"`);
+VividMemory stores *paraphrased extracted facts* (e.g. `"Jon lost his job… decided to
+start his own business"`). Neither substring nor token-Jaccard≥0.5 catches
+paraphrase equivalence, so a fact-extraction memory naturally scores near-zero on
+this proxy. Qualitative spot-check of six queries confirmed that top-1 / top-2
+results are **topically correct** on 5/6 samples (e.g. Q "Why did Jon start his
+dance studio?" → top-1 mentions his studio's investor pitch; Q "What might John's
+financial status be?" → top-2 correctly retrieves the "John lost his job at a
+mechanical engineering company" fact). This mismatch is why the plan reserves
+a real judge stage (Phase 0.3) for ANSWER_* + JUDGE_* env-driven scoring — that
+stage is intentionally deferred until the HuggingFace-hosted datasets and the
+official-equivalent gateway are online.
+
+Baseline artifacts:
 
 ```
+runs/dev_baseline_20260806_204940/
+  locomo/add_checkpoint.jsonl       # 3 rows
+  locomo/search_checkpoint.jsonl    # 60 rows (query + full /search response)
+  locomo/proxy.jsonl                # 60 rows (query_id + recall_at_k)
+  summary.json                      # aggregate
+dev_baseline_20260806_204940.log    # full run log
+```
+
+Reproduce:
+
+```bash
 python -m evaluation.vividmemory_runner.run full \
     --config evaluation/vividmemory_runner/configs/dev.yaml \
-    --run-id baseline_$(date +%Y%m%d_%H%M)
+    --run-id my_run_$(date +%Y%m%d_%H%M)
 ```
 
 ## 7. Experiment table
@@ -69,13 +116,27 @@ python -m evaluation.vividmemory_runner.run full \
 | 4A  | 4 | `enable_local_reranker.sh` helper (wiring only) | all | pending | pending | pending | landed `dd92ab0` |
 | 0.2 | 0 | benchmark runner skeleton (LoCoMo ingest/search/proxy) | LoCoMo dev | pending | n/a | pending | landed `f2ba8c8` |
 | 5   | 5 | runner client exponential backoff + jitter | all | 0 (reliability) | 0 | 0 | landed `9dc6021` |
+| 6   | 6 | README env-var table + progress.md experiment log | — | 0 | 0 | 0 | landed `2f0c690` |
+| BL  | — | **defaults baseline measurement** (LoCoMo dev 3×20) | LoCoMo dev | recall@10 = 0.000 (substring proxy; see §6) | deferred | add p50 307s / search p50 0.70s p95 1.01s | measured `dev_baseline_20260806_204940` |
 
 ## 8. Per-dataset table
 
-| Dataset | Baseline | Best | Best flags | Label |
+| Dataset | Baseline (proxy recall@10) | Best | Best flags | Label |
 |---|---|---|---|---|
+| LoCoMo (dev, 3 conv × 20 q) | 0.000 (60/60 retrieved, 0/60 substring-or-Jaccard hits) | — | defaults | [local-dev, deepseek-v4-pro] |
+| ScriptMem | not-scored (no adapter yet) | — | — | — |
+| BEAM 100K | not-scored (no adapter yet) | — | — | — |
+| CL-Bench | not-scored-locally (HF download deferred by user) | — | — | — |
+| LongMemEval-S | not-scored-locally (HF download deferred by user) | — | — | — |
+| PersonaMem | not-scored-locally (HF download deferred by user) | — | — | — |
 
-_Pending baseline measurement._
+Notes:
+- LoCoMo proxy = 0.000 does **not** mean retrieval is broken. Qualitative check
+  showed topically-correct top-k on 5/6 spot-checked queries. The proxy uses
+  literal substring / token-Jaccard≥0.5 vs raw conversational evidence quotes,
+  which fact-extraction paraphrases never match.
+- Real scoring will require the judge stage (Phase 0.3) once `ANSWER_*` and
+  `JUDGE_*` env vars are populated and the deferred datasets are downloaded.
 
 ## 9. Failed experiments (kept behind disabled flag or reverted)
 
@@ -91,9 +152,19 @@ Flag set:
 
 ## 11. Risks
 
-- CL-Bench / LongMemEval / PersonaMem require HF downloads; deferred.
+- CL-Bench / LongMemEval / PersonaMem require HF downloads; deferred by the user
+  ("先评测vividmemory，deferred后面我再下载" — 2026-08-06). ScriptMem and BEAM local
+  data are present but their runner adapters have not been written yet.
+- **Substring-based proxy metric under-measures fact-extraction memory.** LoCoMo
+  baseline recorded `recall_at_k = 0.000` on 60/60 queries under this proxy while
+  qualitative retrieval is topically correct. A judge stage (Phase 0.3) is
+  required for a faithful comparison. See §6 for details.
 - Cross-encoder rerank adds first-run download; may need Dockerfile pre-fetch step.
 - Prompt tuning must not touch benchmark gold answers.
+- Ingest latency is dominated by LLM-based fact extraction: 165–388 s per LoCoMo
+  conversation (mean 307 s) under `deepseek-v4-pro`. Occasional 502 / transport
+  errors from the gateway are absorbed by the runner's exponential-backoff retry
+  (Phase 5, `9dc6021`).
 
 ## 12. Next actions
 
@@ -108,4 +179,9 @@ Flag set:
 
 ```
 $ git switch -c perf/contest-memory-optimization
+$ python -m evaluation.vividmemory_runner.run full \
+      --config evaluation/vividmemory_runner/configs/dev.yaml \
+      --run-id dev_baseline_20260806_204940
+# -> runs/dev_baseline_20260806_204940/summary.json
+#    { locomo: {num_queries: 60, mean_recall_at_k: 0.000, p50=0.70s, p95=1.01s} }
 ```

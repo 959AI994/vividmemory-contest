@@ -1,0 +1,12 @@
+# Sanity config — 1 LoCoMo conversation, 3 questions. Fast smoke.
+adapter_base_url: http://localhost:8000
+top_k: 10
+add_concurrency: 2
+search_concurrency: 4
+request_timeout_seconds: 600.0
+
+datasets:
+  - name: locomo
+    path: benchmarks/locomo/data/locomo10.json
+    max_conversations: 1
+    max_questions_per_conversation: 3
