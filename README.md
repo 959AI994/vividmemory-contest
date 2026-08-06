@@ -19,7 +19,9 @@ contest-adapter :8000
 vividmemory-api-slim :8888
   POST /v1/default/banks/{bank_id}/memories          (retain)
   POST /v1/default/banks/{bank_id}/memories/recall   (recall)
-  embedded PostgreSQL (pg0)
+        |
+        v
+PostgreSQL + pgvector (Compose service `db`)
 ```
 
 The adapter is a thin protocol layer. It does **not** call `reflect` and does **not** choose multiple-choice answers. Search only returns retrieved memory evidence.
@@ -180,8 +182,8 @@ pytest -q tests/
 
 ## Persistence
 
-Named Docker volume: `vividmemory_pg0`  
-Mounted at: `/home/vividmemory/.pg0` inside the `vividmemory` container.
+Named Docker volume: `vividmemory_pgdata`  
+Mounted at: `/var/lib/postgresql/data` in the `db` container (`pgvector/pgvector:pg16`).
 
 Reset all evaluation data:
 
