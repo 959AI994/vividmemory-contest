@@ -91,3 +91,72 @@ def test_normalize_results_filters_and_top_k():
     assert items[0].score == 0.9
     assert items[1].id == "4"
     assert items[1].content == "Boston"
+
+
+# --- Phase 4B — options_in_query_mode -------------------------------------
+
+
+def test_build_recall_query_default_mode_append_matches_prior_behavior():
+    """Default mode='append' must keep the exact prior 'raw options' behavior."""
+    prior = build_recall_query("Where?", ["A. X", "B. Y"], include_options=True)
+    new = build_recall_query("Where?", ["A. X", "B. Y"], include_options=True, mode="append")
+    assert prior == new
+    assert "A. X" in new
+    assert "B. Y" in new
+
+
+def test_build_recall_query_mode_none_excludes_options():
+    q = build_recall_query(
+        "Where?",
+        ["A. Boston", "B. Seattle"],
+        include_options=True,
+        mode="none",
+    )
+    assert q == "Where?"
+    assert "Boston" not in q
+    assert "Candidate options" not in q
+
+
+def test_build_recall_query_mode_rewrite_strips_option_letters():
+    q = build_recall_query(
+        "Where?",
+        ["A. Boston", "(b) Seattle", "[C] Austin", "D: New York", "e) London", "Boston"],
+        include_options=True,
+        mode="rewrite",
+    )
+    # All prefixes stripped; letter itself not preserved.
+    assert "- Boston" in q
+    assert "- Seattle" in q
+    assert "- Austin" in q
+    assert "- New York" in q
+    assert "- London" in q
+    # No leading "A." or "(b)" left in the option lines.
+    assert "A. Boston" not in q
+    assert "(b) Seattle" not in q
+    assert "[C] Austin" not in q
+    assert "D: New York" not in q
+    assert "e) London" not in q
+
+
+def test_build_recall_query_mode_rewrite_drops_blank_options():
+    """Blank/whitespace-only options are skipped; regex-based dropping is a subset."""
+    q = build_recall_query(
+        "Where?",
+        ["", "   ", "B. Boston"],
+        include_options=True,
+        mode="rewrite",
+    )
+    assert "- Boston" in q
+    # Only one bullet line got emitted.
+    assert q.count("\n- ") == 1
+
+
+def test_build_recall_query_include_false_ignores_mode():
+    for mode in ("append", "none", "rewrite"):
+        q = build_recall_query(
+            "Where?",
+            ["A. Boston"],
+            include_options=False,
+            mode=mode,
+        )
+        assert q == "Where?"

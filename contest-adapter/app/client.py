@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -11,6 +12,12 @@ from .schemas import Message
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
+
+# Phase 4B — used by build_recall_query(mode="rewrite") to strip leading option
+# letters from candidate options. Matches an optional (/[, one ASCII letter, a
+# closing punct )/]/./:, then required whitespace. Never anchor on a specific
+# letter — that would risk overfitting to benchmark option schemes.
+_OPTION_PREFIX_RE = re.compile(r"^\s*[\(\[]?[A-Za-z][\)\]\.\:]\s+")
 
 
 def user_to_bank_id(user_id: str) -> str:
@@ -91,13 +98,29 @@ def format_message_documents(
     return docs
 
 
-def build_recall_query(query: str, options: list[str] | None, *, include_options: bool) -> str:
+def build_recall_query(
+    query: str,
+    options: list[str] | None,
+    *,
+    include_options: bool,
+    mode: Literal["append", "none", "rewrite"] = "append",
+) -> str:
     q = (query or "").strip()
-    if not include_options or not options:
+    if not include_options or not options or mode == "none":
         return q
-    option_lines = "\n".join(f"- {opt}" for opt in options if opt and str(opt).strip())
-    if not option_lines:
+    cleaned: list[str] = []
+    for opt in options:
+        text = str(opt or "").strip()
+        if not text:
+            continue
+        if mode == "rewrite":
+            text = _OPTION_PREFIX_RE.sub("", text).strip()
+            if not text:
+                continue
+        cleaned.append(text)
+    if not cleaned:
         return q
+    option_lines = "\n".join(f"- {t}" for t in cleaned)
     return f"{q}\n\nCandidate options:\n{option_lines}"
 
 

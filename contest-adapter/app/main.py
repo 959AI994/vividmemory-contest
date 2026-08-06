@@ -197,6 +197,7 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
         body.query,
         body.options,
         include_options=settings.include_options_in_query,
+        mode=settings.options_in_query_mode,
     )
     if not query.strip():
         raise HTTPException(status_code=400, detail="query must not be empty")
