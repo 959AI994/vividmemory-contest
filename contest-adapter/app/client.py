@@ -175,14 +175,25 @@ class VividMemoryClient:
         bank_id: str,
         query: str,
         top_k: int,
+        types: list[str] | None = None,
+        prefer_observations: bool = False,
+        tags: list[str] | None = None,
+        tags_match: str = "any",
     ) -> list[dict[str, Any]]:
-        payload = {
+        payload: dict[str, Any] = {
             "query": query,
             "budget": self._settings.recall_budget,
             "max_tokens": self._settings.recall_max_tokens,
             "trace": False,
             "include": {"entities": None},
         }
+        if types is not None:
+            payload["types"] = types
+        if prefer_observations:
+            payload["prefer_observations"] = True
+        if tags is not None:
+            payload["tags"] = tags
+            payload["tags_match"] = tags_match
         url = f"{self._base}/v1/default/banks/{bank_id}/memories/recall"
         logger.info("recall bank=%s top_k=%s query_len=%s", bank_id, top_k, len(query))
         resp = await self._client.post(url, json=payload)

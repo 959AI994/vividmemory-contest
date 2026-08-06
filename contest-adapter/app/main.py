@@ -233,8 +233,22 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
     if not query.strip():
         raise HTTPException(status_code=400, detail="query must not be empty")
 
+    # Phase 3 — dual retrieval flags
+    types: list[str] | None = None
+    prefer_obs = False
+    if settings.recall_include_observations:
+        types = ["world", "experience", "observation"]
+        prefer_obs = True
+
+    vm = _vm(request)
     try:
-        raw = await _vm(request).recall(bank_id=bank_id, query=query, top_k=body.top_k)
+        raw = await vm.recall(
+            bank_id=bank_id,
+            query=query,
+            top_k=body.top_k,
+            types=types,
+            prefer_observations=prefer_obs,
+        )
     except httpx.HTTPStatusError as exc:
         # Empty bank / no results should still be a valid empty list when the
         # core API returns structured empty results. Validation errors on query
@@ -253,6 +267,30 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
     except Exception as exc:  # noqa: BLE001
         logger.exception("recall unexpected error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Phase 3 — episode prepend: fetch raw-observation channel scoped to
+    # `session:<session_id>` and prepend before dedup. Failures here are logged
+    # but do not fail the primary /search response.
+    if (
+        settings.episode_prepend
+        and body.session_id
+        and settings.episode_prepend_count > 0
+    ):
+        try:
+            episode_raw = await vm.recall(
+                bank_id=bank_id,
+                query=query,
+                top_k=settings.episode_prepend_count,
+                types=["observation"],
+                tags=[f"session:{body.session_id}"],
+                tags_match="any",
+            )
+            if episode_raw:
+                raw = episode_raw[: settings.episode_prepend_count] + raw
+        except httpx.HTTPError as exc:
+            logger.warning("episode prepend recall failed (ignored): %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("episode prepend recall unexpected error (ignored): %s", exc)
 
     return SearchResponse(
         data=_normalize_results(
