@@ -38,7 +38,7 @@ the contest adapter and engine wiring — without rewriting the core.
 
 ## 5. Baseline configuration
 
-- Branch commit: pending Phase 0 close-out
+- Branch commit: `f2ba8c8` (Phase 0.2 runner skeleton) — pending baseline run
 - Adapter flags: all defaults (see `.env.example`)
 - LLM: `gpt-4o-mini` (or gateway equivalent per `.env`)
 - Embed: `text-embedding-3-small`
@@ -46,23 +46,36 @@ the contest adapter and engine wiring — without rewriting the core.
 
 ## 6. Baseline results
 
-_Populated after Phase 0.4 runs. Records: score / recall@k / add-P50 / add-P95 / search-P50 / search-P95 / error rate / retries._
+_Pending. Populated after running:_
 
-_Pending._
+```
+python -m evaluation.vividmemory_runner.run full \
+    --config evaluation/vividmemory_runner/configs/dev.yaml \
+    --run-id baseline_$(date +%Y%m%d_%H%M)
+```
 
 ## 7. Experiment table
 
 | # | Phase | Flag change | Dataset(s) | Proxy metric Δ | Judge score Δ | Latency Δ | Status |
 |---|---|---|---|---|---|---|---|
-
-_Pending._
+| 0.1 | 0 | branch + gitignore + progress.md | — | n/a | n/a | n/a | landed `94e3dba` |
+| 0.3 | 0 | env vars + Compose wiring (no behavior change) | — | 0 | 0 | 0 | landed `da425f7`, followup `9e2b2ab` |
+| 2   | 0 | adapter settings + schema additions | — | 0 | 0 | 0 | landed `3e0bb50`, tightened `ccc1e30` |
+| 1   | 1 | `ADAPTER_PER_MESSAGE_RETAIN` (flag off by default) | LoCoMo (targeted) | pending | pending | pending | landed `2133068` |
+| 4B  | 4 | `ADAPTER_OPTIONS_IN_QUERY_MODE` append/none/rewrite | BEAM/CL-Bench (MCQ) | pending | pending | pending | landed `78a1896` |
+| 4C  | 4 | `ADAPTER_NEAR_DEDUP_THRESHOLD` token-Jaccard collapse | all | pending | pending | pending | landed `2d36b41` |
+| 3   | 3 | `ADAPTER_RECALL_INCLUDE_OBSERVATIONS` + `ADAPTER_EPISODE_PREPEND` | ScriptMem, LoCoMo | pending | pending | pending | landed `91f2a4f` |
+| 2   | 2 | custom-extraction prompt file + `enable_contest_extraction.sh` | LongMemEval-like | pending | pending | pending | landed `bf3c2ce` |
+| 4A  | 4 | `enable_local_reranker.sh` helper (wiring only) | all | pending | pending | pending | landed `dd92ab0` |
+| 0.2 | 0 | benchmark runner skeleton (LoCoMo ingest/search/proxy) | LoCoMo dev | pending | n/a | pending | landed `f2ba8c8` |
+| 5   | 5 | runner client exponential backoff + jitter | all | 0 (reliability) | 0 | 0 | landed `9dc6021` |
 
 ## 8. Per-dataset table
 
 | Dataset | Baseline | Best | Best flags | Label |
 |---|---|---|---|---|
 
-_Pending._
+_Pending baseline measurement._
 
 ## 9. Failed experiments (kept behind disabled flag or reverted)
 
