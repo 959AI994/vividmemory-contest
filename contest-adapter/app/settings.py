@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,7 +77,7 @@ class Settings(BaseSettings):
     )
 
     # Phase 4B — options query rewriting
-    options_in_query_mode: str = Field(
+    options_in_query_mode: Literal["append", "none", "rewrite"] = Field(
         default="append",
         validation_alias=AliasChoices("ADAPTER_OPTIONS_IN_QUERY_MODE", "options_in_query_mode"),
         description="How options are folded into the recall query: append | none | rewrite",

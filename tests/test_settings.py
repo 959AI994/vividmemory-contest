@@ -90,13 +90,17 @@ def test_near_dedup_threshold_out_of_range(monkeypatch: pytest.MonkeyPatch) -> N
         Settings(_env_file=None)
 
 
-def test_options_in_query_mode_accepts_any_string(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_options_in_query_mode_accepts_valid_values(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_new_env(monkeypatch)
     monkeypatch.setenv("ADAPTER_OPTIONS_IN_QUERY_MODE", "rewrite")
     assert Settings(_env_file=None).options_in_query_mode == "rewrite"
 
     monkeypatch.setenv("ADAPTER_OPTIONS_IN_QUERY_MODE", "none")
     assert Settings(_env_file=None).options_in_query_mode == "none"
+
+    monkeypatch.setenv("ADAPTER_OPTIONS_IN_QUERY_MODE", "apend")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
 
 
 def test_search_request_session_id_optional() -> None:
