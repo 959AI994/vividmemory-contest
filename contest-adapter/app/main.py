@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -145,10 +146,31 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
     )
 
 
-def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[SearchResultItem]:
+def _tokenize_for_dedup(text: str) -> frozenset[str]:
+    """Lowercased alphanumeric-token set for Jaccard near-dedup."""
+    return frozenset(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    return inter / len(a | b)
+
+
+def _normalize_results(
+    raw_results: list[dict[str, Any]],
+    top_k: int,
+    *,
+    near_dedup_threshold: float = 0.0,
+) -> list[SearchResultItem]:
     seen_ids: set[str] = set()
     seen_content: set[str] = set()
     items: list[SearchResultItem] = []
+    kept_tokens: list[frozenset[str]] = []
+    dedup_active = near_dedup_threshold > 0.0
 
     for row in raw_results:
         memory_id = str(row.get("id") or "").strip()
@@ -159,6 +181,13 @@ def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[Se
             continue
         if content in seen_content:
             continue
+
+        if dedup_active:
+            tokens = _tokenize_for_dedup(content)
+            if any(_jaccard(tokens, kt) >= near_dedup_threshold for kt in kept_tokens):
+                continue
+        else:
+            tokens = frozenset()
 
         score = None
         scores = row.get("scores")
@@ -174,6 +203,8 @@ def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[Se
 
         seen_ids.add(memory_id)
         seen_content.add(content)
+        if dedup_active:
+            kept_tokens.append(tokens)
         items.append(
             SearchResultItem(
                 id=memory_id,
@@ -223,4 +254,10 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
         logger.exception("recall unexpected error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return SearchResponse(data=_normalize_results(raw, body.top_k))
+    return SearchResponse(
+        data=_normalize_results(
+            raw,
+            body.top_k,
+            near_dedup_threshold=settings.near_dedup_threshold,
+        )
+    )
