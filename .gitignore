@@ -1,0 +1,42 @@
+.env
+.env.*
+!.env.example
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+node_modules/
+*.log
+.DS_Store
+
+# Local DB / Docker volume data
+*.sqlite
+*.db
+pgdata/
+.pg0/
+data/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
