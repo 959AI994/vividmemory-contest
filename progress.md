@@ -264,3 +264,53 @@ $ python -m evaluation.vividmemory_runner.run full \
 # -> runs/dev_baseline_20260806_204940/summary.json
 #    { locomo: {num_queries: 60, mean_recall_at_k: 0.000, p50=0.70s, p95=1.01s} }
 ```
+
+## 14. Ship measurement — LoCoMo 5-conv holdout (N=999), 2026-08-07
+
+Answer + judge: `deepseek-v4-pro` (internal gateway, temperature 0). Ingest: `deepseek-v4-pro` on official DeepSeek API (partial), then internal gateway for answer/judge after the official-API budget hit `402 Payment Required` at judge call 606/999 (see below). Adapter build: `perf/contest-memory-optimization` at commit `33ba5da` with the three-flag flip and 300→1200 timeout bump staged.
+
+- 5-conv holdout: `conv-26, conv-30, conv-41, conv-42, conv-43` — 128 sessions, 2760 turns, 999 questions.
+- Statistical band at N=999: roughly ±1.3 pp (from the ±5 pp @ N=60 dev-subset band, scaled by √(60/999)).
+
+| Config                            | correct/total   | accuracy | Δ vs baseline |
+| --------------------------------- | --------------- | -------- | ------------- |
+| Baseline (pre-ship defaults)      | 314 / 999       | 31.43%   | —             |
+| Integrated (shipped defaults)     | 355 / 999       | 35.54%   | **+4.10 pp**  |
+
+Per-conversation:
+
+| conv    | baseline    | integrated  | Δ pp   |
+| ------- | ----------- | ----------- | ------ |
+| conv-26 | 30.7%       | 33.7%       | +3.02  |
+| conv-30 | 21.0%       | 21.0%       | +0.00  |
+| conv-41 | 42.5%       | 50.3%       | +7.77  |
+| conv-42 | 26.9%       | 31.2%       | +4.23  |
+| conv-43 | 32.6%       | 36.4%       | +3.72  |
+
+4/5 positive, 1/5 flat, 0/5 negative. Above 3× the noise band, above the ≥2-3 pp user gate. Ship decision: **flip Docker defaults**, do not expand to the full 10-conv holdout.
+
+Latencies:
+
+- Ingest: 5 convs, add_concurrency=2, total wall 1404 s, per-conv min 135 s / mean 281 s / max 366 s.
+- Search: baseline p50=691 ms / p95=975 ms; integrated p50=659 ms / p95=888 ms (integrated slightly faster despite dual retrieval — near-dedup shrinks the fused candidate set).
+- Answer (999 completions, concurrency 8): ~27 min wall.
+- Judge (999 completions, concurrency 8): ~13 min wall.
+
+Blockers encountered (worked around, not gating):
+
+- **Official DeepSeek API budget exhausted mid-judge.** After baseline ingest + answer + ~605 judge calls on `sk-59b1…d772`, the endpoint started returning `HTTP/1.1 402 Payment Required`. Judge process crashed; `scores.jsonl` was never written (buffered write at end of `run_evaluate`). Recovered by pointing `ANSWER_API_BASE` / `JUDGE_API_BASE` back to the internal deepseek-v4-pro gateway (`10.210.0.46:40017/v1`) and re-running judge from scratch. See §5's `.env` backup timestamps for the switch history.
+- **Adapter 300 s HTTP timeout too short for 663-turn `/add`.** First ingest attempt hit `502 Bad Gateway` at conv-41. Bumped default to 1200 s in `docker-compose.yml` + `settings.py`; all 5 conv `/add` calls landed cleanly after.
+- **Internal LLM gateway is highly variable under load** (100–800 s per LLM call at peak, consolidation slots 10/10 full). Adapter's engine-side ingest scaled OK at `add_concurrency=2` and `1200 s` timeout, but a fresh full-10-conv baseline at `add_concurrency=4` was extrapolated to ~2 h wall, prompting the user's scope-down to 5 conversations for the score-ship gate.
+
+Shipped config (Docker defaults):
+
+```
+ADAPTER_RECALL_INCLUDE_OBSERVATIONS=true    # flipped from false
+ADAPTER_OPTIONS_IN_QUERY_MODE=rewrite       # flipped from append
+ADAPTER_NEAR_DEDUP_THRESHOLD=0.85           # flipped from 0.0
+ADAPTER_HTTP_TIMEOUT_SECONDS=1200           # bumped from 300
+ADAPTER_EPISODE_PREPEND=false               # (unchanged) episode prepend regressed in earlier E2
+RERANKER_PROVIDER=rrf                       # (unchanged) local reranker still blocked by image dep
+```
+
+Full ship rationale, per-flag data, and reproducibility runbook are in `FINAL_REPORT.md`.

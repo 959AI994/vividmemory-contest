@@ -67,15 +67,16 @@ cp .env.example .env
 | `RERANKER_LOCAL_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Only used when `RERANKER_PROVIDER=local` |
 | `RERANKER_LOCAL_FORCE_CPU` | `true` | Force CPU mode for the local reranker |
 | `ADAPTER_INCLUDE_OPTIONS_IN_QUERY` | `true` | Append Search `options` under the original query |
-| `ADAPTER_OPTIONS_IN_QUERY_MODE` | `append` | `append` / `none` / `rewrite` (strip option letters) |
+| `ADAPTER_OPTIONS_IN_QUERY_MODE` | `rewrite` | `append` / `none` / `rewrite` (strip option letters, keep option text) |
 | `ADAPTER_RECALL_BUDGET` | `high` | Recall token budget passed to the engine |
 | `ADAPTER_RECALL_MAX_TOKENS` | `8192` | Recall max tokens returned |
+| `ADAPTER_HTTP_TIMEOUT_SECONDS` | `1200` | Adapter → engine HTTP timeout; long enough for the slowest 600-turn `/add` |
 | `ADAPTER_PER_MESSAGE_RETAIN` | `false` | Retain each message as its own document |
 | `ADAPTER_RETAIN_CONCURRENCY` | `4` | Parallel retain calls per /add |
-| `ADAPTER_RECALL_INCLUDE_OBSERVATIONS` | `false` | Include observation-type units in primary recall |
+| `ADAPTER_RECALL_INCLUDE_OBSERVATIONS` | `true` | Include observation-type units in primary recall |
 | `ADAPTER_EPISODE_PREPEND` | `false` | Second recall for raw-episode units, prepended before dedup |
 | `ADAPTER_EPISODE_PREPEND_COUNT` | `2` | Max prepended episodes when `ADAPTER_EPISODE_PREPEND=true` |
-| `ADAPTER_NEAR_DEDUP_THRESHOLD` | `0.0` | Token-Jaccard collapse threshold (0.0 disables) |
+| `ADAPTER_NEAR_DEDUP_THRESHOLD` | `0.85` | Token-Jaccard collapse threshold (0.0 disables) |
 | `RETAIN_EXTRACTION_MODE` | `concise` | `concise` / `verbose` / `custom` extraction |
 | `RETAIN_CUSTOM_INSTRUCTIONS` | _(empty)_ | Only used when mode=`custom`; see `scripts/enable_contest_extraction.sh` |
 | `ANSWER_API_BASE` / `ANSWER_API_KEY` / `ANSWER_MODEL` / `ANSWER_PROVIDER` | _(empty)_ | Answer LLM for the eval runner; env-only |
@@ -86,6 +87,17 @@ Default contest stack:
 - LLM: OpenAI `gpt-4o-mini`
 - Embeddings: OpenAI `text-embedding-3-small`
 - Reranker: `rrf` (no neural reranker)
+
+### Recommended profile (shipped defaults)
+
+The Docker defaults are already the LoCoMo-tuned "integrated" profile that shipped on 2026-08-07:
+
+- `ADAPTER_OPTIONS_IN_QUERY_MODE=rewrite` — strip A./B./C./D. option letters so they don't pollute recall
+- `ADAPTER_RECALL_INCLUDE_OBSERVATIONS=true` — dual retrieval (concept + observation)
+- `ADAPTER_NEAR_DEDUP_THRESHOLD=0.85` — collapse near-duplicate concept/observation pairs
+- `ADAPTER_HTTP_TIMEOUT_SECONDS=1200` — accommodates the slowest 600-turn `/add`
+
+Measured lift over the pre-2026-08-07 defaults on the LoCoMo 5-conv holdout (N=999 questions, deepseek-v4-pro judge): **31.4% → 35.5% (+4.10 pp)**. Positive on 4 of 5 conversations, zero regressions. See `FINAL_REPORT.md`. To revert to the pre-ship profile, set the three adapter flags above back to `append` / `false` / `0.0` in `.env` before `docker compose up`.
 
 ## One-command start
 
@@ -197,8 +209,7 @@ pytest -q tests/
 
 ## Optional feature toggles
 
-All feature-flag defaults preserve current behavior. Each flag is documented
-in `.env.example` and wired in `docker-compose.yml`.
+The Docker defaults ship the winning "integrated" profile (see the **Recommended profile** subsection above). Each individual flag is still documented in `.env.example` and wired in `docker-compose.yml`, so you can flip any one back to its pre-ship value by setting it in `.env` before `docker compose up`.
 
 Two helper scripts export the required env vars into the current shell:
 

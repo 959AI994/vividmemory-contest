@@ -32,16 +32,20 @@ def _clear_new_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def test_defaults_preserve_current_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_defaults_ship_the_winning_holdout_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Locks in the 2026-08-07 ship defaults: `include_observations=true`,
+    `options_in_query_mode=rewrite`, `near_dedup_threshold=0.85`. See
+    FINAL_REPORT.md for the +4.10 pp lift these produce on the LoCoMo 5-conv
+    holdout. Flags left at their original defaults stay as-is."""
     _clear_new_env(monkeypatch)
     settings = Settings(_env_file=None)
     assert settings.per_message_retain is False
     assert settings.retain_concurrency == 4
-    assert settings.recall_include_observations is False
+    assert settings.recall_include_observations is True
     assert settings.episode_prepend is False
     assert settings.episode_prepend_count == 2
-    assert settings.options_in_query_mode == "append"
-    assert settings.near_dedup_threshold == 0.0
+    assert settings.options_in_query_mode == "rewrite"
+    assert settings.near_dedup_threshold == 0.85
     assert settings.include_options_in_query is True
 
 
