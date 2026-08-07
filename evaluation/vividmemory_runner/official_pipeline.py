@@ -92,17 +92,21 @@ async def run_answer(
     logger.info("answer: %d items, %d already done, %d to go", len(items), len(done), len(todo))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    async with httpx.AsyncClient(timeout=180) as client:
+    async with httpx.AsyncClient(timeout=900) as client:
 
         async def one(item: dict[str, Any]) -> dict[str, Any]:
             prompt = module.render_answer_prompt(item)
-            generated = await _complete(
-                client,
-                base_url=ANSWER_API_BASE,
-                api_key=ANSWER_API_KEY,
-                model=ANSWER_MODEL,
-                prompt=prompt,
-            )
+            try:
+                generated = await _complete(
+                    client,
+                    base_url=ANSWER_API_BASE,
+                    api_key=ANSWER_API_KEY,
+                    model=ANSWER_MODEL,
+                    prompt=prompt,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("answer failed for %s: %s", item["id"], exc)
+                return {"id": item["id"], "generated_answer": "", "error": str(exc)}
             return {"id": item["id"], "generated_answer": generated}
 
         results = await _bounded([one(it) for it in todo], concurrency)
@@ -135,18 +139,28 @@ async def run_evaluate(
     logger.info("evaluate: %d items", len(items))
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with httpx.AsyncClient(timeout=180) as client:
+    async with httpx.AsyncClient(timeout=900) as client:
 
         async def judge_one(ident: str) -> dict[str, Any]:
             item = items[ident]
             prompt = module.render_accuracy_prompt(item, answers[ident])
-            resp = await _complete(
-                client,
-                base_url=JUDGE_API_BASE,
-                api_key=JUDGE_API_KEY,
-                model=JUDGE_MODEL,
-                prompt=prompt,
-            )
+            try:
+                resp = await _complete(
+                    client,
+                    base_url=JUDGE_API_BASE,
+                    api_key=JUDGE_API_KEY,
+                    model=JUDGE_MODEL,
+                    prompt=prompt,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("judge call failed for %s: %s", ident, exc)
+                return {
+                    "id": ident,
+                    "label": "WRONG",
+                    "is_correct": False,
+                    "judge_response": "",
+                    "error": str(exc),
+                }
             try:
                 label = module.parse_judge_label(resp)
             except Exception as exc:  # noqa: BLE001

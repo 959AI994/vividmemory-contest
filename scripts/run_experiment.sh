@@ -51,10 +51,12 @@ sleep 3
 curl -sf http://localhost:8000/health > /dev/null || { echo "adapter not healthy"; exit 1; }
 
 # Re-search.
-echo "--- re-searching 60 queries ---"
+TOP_K="${TOP_K:-10}"
+echo "--- re-searching queries (top_k=${TOP_K}) ---"
 python -m evaluation.vividmemory_runner.experiment \
     --baseline-search "${BASELINE_DIR}/search_checkpoint.jsonl" \
     --output "${EXP_DIR}/search_checkpoint.jsonl" \
+    --top-k "${TOP_K}" \
     --concurrency 8
 
 # Enrich.
