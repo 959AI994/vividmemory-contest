@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,6 +14,7 @@ from .client import (
     VividMemoryClient,
     build_recall_query,
     format_conversation_document,
+    format_message_documents,
     user_to_bank_id,
 )
 from .schemas import AddRequest, AddResponse, SearchRequest, SearchResponse, SearchResultItem
@@ -73,7 +76,6 @@ async def health(request: Request) -> JSONResponse:
 
 @app.post("/add", response_model=AddResponse)
 async def add_memories(body: AddRequest, request: Request) -> AddResponse:
-    """Persist contest messages via synchronous retain."""
     if not body.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
@@ -81,31 +83,48 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
     bank_id = user_to_bank_id(body.user_id)
 
     try:
-        content = format_conversation_document(
-            messages=body.messages,
-            request_id=body.request_id,
-            session_id=body.session_id,
-        )
+        if settings.per_message_retain:
+            documents = format_message_documents(
+                messages=body.messages,
+                request_id=body.request_id,
+                session_id=body.session_id,
+            )
+        else:
+            content = format_conversation_document(
+                messages=body.messages,
+                request_id=body.request_id,
+                session_id=body.session_id,
+            )
+            timestamps = [m.timestamp for m in body.messages if m.timestamp is not None]
+            latest_ts_iso = None
+            if timestamps:
+                from datetime import datetime, timezone
+                latest_ms = max(timestamps)
+                latest_ts_iso = datetime.fromtimestamp(
+                    latest_ms / 1000.0, tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            documents = [(body.request_id, content, latest_ts_iso)]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Prefer the latest message timestamp as the document event time.
-    timestamps = [m.timestamp for m in body.messages if m.timestamp is not None]
-    timestamp_iso = None
-    if timestamps:
-        from datetime import datetime, timezone
+    semaphore = asyncio.Semaphore(settings.retain_concurrency)
+    vm = _vm(request)
 
-        latest_ms = max(timestamps)
-        timestamp_iso = datetime.fromtimestamp(latest_ms / 1000.0, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async def _one(doc_id: str, doc_content: str, ts_iso: str | None) -> None:
+        async with semaphore:
+            await vm.retain_document(
+                bank_id=bank_id,
+                content=doc_content,
+                document_id=doc_id,
+                session_id=body.session_id,
+                timestamp_iso=ts_iso,
+            )
 
     try:
-        await _vm(request).retain_document(
-            bank_id=bank_id,
-            content=content,
-            document_id=body.request_id,
-            session_id=body.session_id,
-            timestamp_iso=timestamp_iso,
-        )
+        await asyncio.gather(*(
+            _one(doc_id, doc_content, ts_iso)
+            for doc_id, doc_content, ts_iso in documents
+        ))
     except httpx.HTTPStatusError as exc:
         logger.exception("retain HTTP error")
         raise HTTPException(
@@ -119,7 +138,6 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
         logger.exception("retain unexpected error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    _ = settings  # reserved for future adapter knobs
     return AddResponse(
         success=True,
         request_id=body.request_id,
@@ -128,10 +146,31 @@ async def add_memories(body: AddRequest, request: Request) -> AddResponse:
     )
 
 
-def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[SearchResultItem]:
+def _tokenize_for_dedup(text: str) -> frozenset[str]:
+    """Lowercased alphanumeric-token set for Jaccard near-dedup."""
+    return frozenset(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter == 0:
+        return 0.0
+    return inter / len(a | b)
+
+
+def _normalize_results(
+    raw_results: list[dict[str, Any]],
+    top_k: int,
+    *,
+    near_dedup_threshold: float = 0.0,
+) -> list[SearchResultItem]:
     seen_ids: set[str] = set()
     seen_content: set[str] = set()
     items: list[SearchResultItem] = []
+    kept_tokens: list[frozenset[str]] = []
+    dedup_active = near_dedup_threshold > 0.0
 
     for row in raw_results:
         memory_id = str(row.get("id") or "").strip()
@@ -142,6 +181,13 @@ def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[Se
             continue
         if content in seen_content:
             continue
+
+        if dedup_active:
+            tokens = _tokenize_for_dedup(content)
+            if any(_jaccard(tokens, kt) >= near_dedup_threshold for kt in kept_tokens):
+                continue
+        else:
+            tokens = frozenset()
 
         score = None
         scores = row.get("scores")
@@ -157,6 +203,8 @@ def _normalize_results(raw_results: list[dict[str, Any]], top_k: int) -> list[Se
 
         seen_ids.add(memory_id)
         seen_content.add(content)
+        if dedup_active:
+            kept_tokens.append(tokens)
         items.append(
             SearchResultItem(
                 id=memory_id,
@@ -180,12 +228,27 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
         body.query,
         body.options,
         include_options=settings.include_options_in_query,
+        mode=settings.options_in_query_mode,
     )
     if not query.strip():
         raise HTTPException(status_code=400, detail="query must not be empty")
 
+    # Phase 3 — dual retrieval flags
+    types: list[str] | None = None
+    prefer_obs = False
+    if settings.recall_include_observations:
+        types = ["world", "experience", "observation"]
+        prefer_obs = True
+
+    vm = _vm(request)
     try:
-        raw = await _vm(request).recall(bank_id=bank_id, query=query, top_k=body.top_k)
+        raw = await vm.recall(
+            bank_id=bank_id,
+            query=query,
+            top_k=body.top_k,
+            types=types,
+            prefer_observations=prefer_obs,
+        )
     except httpx.HTTPStatusError as exc:
         # Empty bank / no results should still be a valid empty list when the
         # core API returns structured empty results. Validation errors on query
@@ -205,4 +268,34 @@ async def search_memories(body: SearchRequest, request: Request) -> SearchRespon
         logger.exception("recall unexpected error")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return SearchResponse(data=_normalize_results(raw, body.top_k))
+    # Phase 3 — episode prepend: fetch raw-observation channel scoped to
+    # `session:<session_id>` and prepend before dedup. Failures here are logged
+    # but do not fail the primary /search response.
+    if (
+        settings.episode_prepend
+        and body.session_id
+        and settings.episode_prepend_count > 0
+    ):
+        try:
+            episode_raw = await vm.recall(
+                bank_id=bank_id,
+                query=query,
+                top_k=settings.episode_prepend_count,
+                types=["observation"],
+                tags=[f"session:{body.session_id}"],
+                tags_match="any",
+            )
+            if episode_raw:
+                raw = episode_raw[: settings.episode_prepend_count] + raw
+        except httpx.HTTPError as exc:
+            logger.warning("episode prepend recall failed (ignored): %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("episode prepend recall unexpected error (ignored): %s", exc)
+
+    return SearchResponse(
+        data=_normalize_results(
+            raw,
+            body.top_k,
+            near_dedup_threshold=settings.near_dedup_threshold,
+        )
+    )

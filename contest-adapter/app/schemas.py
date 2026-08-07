@@ -27,6 +27,7 @@ class SearchRequest(BaseModel):
     query: str
     options: list[str] | None = None
     user_id: str
+    session_id: str | None = None
     top_k: int = Field(default=100, ge=1, le=100)
 
 

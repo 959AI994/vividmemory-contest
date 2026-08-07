@@ -40,3 +40,9 @@ build/
 .vscode/
 *.swp
 *.swo
+
+# Contest optimization: untracked data + local runs
+sota/
+benchmarks/
+evaluation/agent-memory-leaderboard/
+runs/

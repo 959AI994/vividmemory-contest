@@ -1,0 +1,74 @@
+══════════════════════════════════════════════════════════════════════════
+CONTEST-CUSTOM MODE — Transitions, negations, exact quantities
+══════════════════════════════════════════════════════════════════════════
+
+Extract every atomic fact from the input that a downstream retrieval system
+might need to answer a factual question about the user, the assistant's
+actions, or the world state as described. Optimize for recall AND precision:
+never invent facts, never merge two facts into one summary, never omit an
+exact number, date, quantity, or named entity that the source explicitly
+states.
+
+CORE RULES
+
+1) One atomic fact per entry. If a sentence carries multiple claims,
+   produce multiple entries (e.g. "I moved from Boston to Seattle in 2024"
+   is TWO facts: a departure and an arrival — plus a date if temporal).
+2) Preserve exact values verbatim in the `what` field:
+   - dollar amounts, prices, counts, ages, distances, durations, weights
+   - absolute dates ("March 4, 2024"), quarters ("Q3 2025"), relative
+     expressions grounded by the conversation ("last Tuesday" resolved
+     against query_timestamp only if unambiguous — otherwise keep raw).
+   - proper nouns (people, places, organizations, products) spelled as
+     given.
+3) State transitions are first-class. When the source describes a change
+   ("moved to", "switched from X to Y", "was hired at", "left", "cancelled",
+   "no longer works at", "used to like ... now prefers"), extract:
+     - the old state with an appropriate temporal bound (invalid_at, or a
+       `context` note "superseded by <new state>")
+     - the new state with occurred_start set from the transition text
+   Do NOT collapse the transition into a single joint fact.
+4) Negations are facts. "Never", "stopped", "cancelled", "no longer",
+   "unsubscribed", "quit", "refuses to", "won't", "does not eat X" — all
+   become explicit negative facts. Retain the exact verb from the source
+   so downstream queries can match "quit vs. stopped vs. left".
+5) Assistant-side context. When the assistant commits to remember, act
+   on, or has already done something for the user (booked a table,
+   emailed the report, corrected an earlier answer), extract that as an
+   assistant-scoped fact using fact_type="assistant" so the retrieval
+   system can surface it in follow-up turns.
+6) Corrections and retractions. If a later message overrides an earlier
+   one ("actually it's Portland, not Seattle"), emit BOTH facts and mark
+   the earlier one with `context` = "corrected: superseded by <new
+   value>". The engine's consolidation will resolve which is currently
+   valid; your job is to preserve the historical trace.
+7) Temporal metadata:
+   - `occurred_start` — the earliest moment the fact is asserted to hold.
+   - `occurred_end` — set only if the source explicitly bounds it.
+   - `when` — free-form phrase from the source when a precise ISO
+     timestamp is not stated.
+   Prefer occurred_start=null over guessing. Never fabricate a date.
+8) Entities. Extract every named person, place, organization, product,
+   or well-known concept mentioned. If a pronoun is used, resolve it
+   from context ONLY if unambiguous within the same turn.
+
+WHAT NOT TO DO
+
+- Do not summarize multiple messages into a compound fact.
+- Do not paraphrase numbers or dates into rough forms ("about 2024",
+  "some hundreds of dollars", "recently").
+- Do not extract meta-observations about the conversation itself
+  ("user asked a question", "assistant clarified") unless they carry
+  a factual claim.
+- Do not extract phatic content, greetings, or acknowledgments.
+
+FACT_TYPE GUIDANCE
+
+- "world"      — objective facts, user preferences, rules, corrections,
+                 constraints, personal traits stated by the user.
+- "experience" — subjective experiences the user had (visited X, felt Y,
+                 tasted Z).
+- "assistant"  — actions the assistant/agent actually performed on the
+                 user's behalf.
+
+Use exactly one type per entry.

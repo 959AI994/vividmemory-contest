@@ -63,8 +63,23 @@ cp .env.example .env
 | `EMBEDDINGS_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
 | `EMBEDDINGS_API_KEY` | _(optional)_ | Falls back to `LLM_API_KEY` inside the engine |
 | `EMBEDDINGS_BASE_URL` | _(optional)_ | OpenAI-compatible embeddings base URL |
-| `RERANKER_PROVIDER` | `rrf` | RRF passthrough (no local cross-encoder) |
+| `RERANKER_PROVIDER` | `rrf` | `rrf` passthrough or `local` cross-encoder |
+| `RERANKER_LOCAL_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Only used when `RERANKER_PROVIDER=local` |
+| `RERANKER_LOCAL_FORCE_CPU` | `true` | Force CPU mode for the local reranker |
 | `ADAPTER_INCLUDE_OPTIONS_IN_QUERY` | `true` | Append Search `options` under the original query |
+| `ADAPTER_OPTIONS_IN_QUERY_MODE` | `append` | `append` / `none` / `rewrite` (strip option letters) |
+| `ADAPTER_RECALL_BUDGET` | `high` | Recall token budget passed to the engine |
+| `ADAPTER_RECALL_MAX_TOKENS` | `8192` | Recall max tokens returned |
+| `ADAPTER_PER_MESSAGE_RETAIN` | `false` | Retain each message as its own document |
+| `ADAPTER_RETAIN_CONCURRENCY` | `4` | Parallel retain calls per /add |
+| `ADAPTER_RECALL_INCLUDE_OBSERVATIONS` | `false` | Include observation-type units in primary recall |
+| `ADAPTER_EPISODE_PREPEND` | `false` | Second recall for raw-episode units, prepended before dedup |
+| `ADAPTER_EPISODE_PREPEND_COUNT` | `2` | Max prepended episodes when `ADAPTER_EPISODE_PREPEND=true` |
+| `ADAPTER_NEAR_DEDUP_THRESHOLD` | `0.0` | Token-Jaccard collapse threshold (0.0 disables) |
+| `RETAIN_EXTRACTION_MODE` | `concise` | `concise` / `verbose` / `custom` extraction |
+| `RETAIN_CUSTOM_INSTRUCTIONS` | _(empty)_ | Only used when mode=`custom`; see `scripts/enable_contest_extraction.sh` |
+| `ANSWER_API_BASE` / `ANSWER_API_KEY` / `ANSWER_MODEL` / `ANSWER_PROVIDER` | _(empty)_ | Answer LLM for the eval runner; env-only |
+| `JUDGE_API_BASE` / `JUDGE_API_KEY` / `JUDGE_MODEL` / `JUDGE_VERSION` / `JUDGE_PROVIDER` | _(empty)_ | Judge LLM for the eval runner; env-only |
 
 Default contest stack:
 
@@ -179,6 +194,43 @@ Offline unit tests:
 pip install pytest pydantic pydantic-settings httpx fastapi
 pytest -q tests/
 ```
+
+## Optional feature toggles
+
+All feature-flag defaults preserve current behavior. Each flag is documented
+in `.env.example` and wired in `docker-compose.yml`.
+
+Two helper scripts export the required env vars into the current shell:
+
+```bash
+# Enable the contest custom extraction prompt (Phase 2).
+source scripts/enable_contest_extraction.sh
+docker compose up -d --wait
+
+# Enable the engine's local cross-encoder reranker (Phase 4A).
+source scripts/enable_local_reranker.sh
+docker compose up -d --wait
+```
+
+The other adapter flags (`ADAPTER_PER_MESSAGE_RETAIN`, `ADAPTER_EPISODE_PREPEND`,
+`ADAPTER_RECALL_INCLUDE_OBSERVATIONS`, `ADAPTER_OPTIONS_IN_QUERY_MODE`,
+`ADAPTER_NEAR_DEDUP_THRESHOLD`) can be flipped by setting them in `.env`
+before `docker compose up -d`.
+
+## Benchmark runner (dev only)
+
+A minimal offline runner lives under `evaluation/vividmemory_runner/`. It
+covers **ingest → search → proxy** for LoCoMo (10-conversation dataset). See
+`evaluation/vividmemory_runner/README.md` for details.
+
+```bash
+python -m evaluation.vividmemory_runner.run full \
+    --config evaluation/vividmemory_runner/configs/dev.yaml \
+    --run-id dev_$(date +%Y%m%d_%H%M)
+```
+
+Answer/judge stages require `ANSWER_API_*` / `JUDGE_API_*` env vars and are
+deliberately not implemented in the skeleton (see plan Phase 0.3).
 
 ## Persistence
 

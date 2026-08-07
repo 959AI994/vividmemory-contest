@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,6 +41,55 @@ class Settings(BaseSettings):
     port: int = Field(
         default=8000,
         validation_alias=AliasChoices("ADAPTER_PORT", "port"),
+    )
+
+    # Phase 1 — per-message retain
+    per_message_retain: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ADAPTER_PER_MESSAGE_RETAIN", "per_message_retain"),
+        description="Retain each contest message as its own document when true",
+    )
+    retain_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        validation_alias=AliasChoices("ADAPTER_RETAIN_CONCURRENCY", "retain_concurrency"),
+        description="Bounded parallel retain calls when per_message_retain is true",
+    )
+
+    # Phase 3 — dual retrieval
+    recall_include_observations: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ADAPTER_RECALL_INCLUDE_OBSERVATIONS", "recall_include_observations"),
+        description="Ask the engine to include observation-type units in recall",
+    )
+    episode_prepend: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ADAPTER_EPISODE_PREPEND", "episode_prepend"),
+        description="Prepend a second-channel raw-episode recall to the primary results",
+    )
+    episode_prepend_count: int = Field(
+        default=2,
+        ge=0,
+        le=20,
+        validation_alias=AliasChoices("ADAPTER_EPISODE_PREPEND_COUNT", "episode_prepend_count"),
+        description="Maximum episodes prepended when episode_prepend is true",
+    )
+
+    # Phase 4B — options query rewriting
+    options_in_query_mode: Literal["append", "none", "rewrite"] = Field(
+        default="append",
+        validation_alias=AliasChoices("ADAPTER_OPTIONS_IN_QUERY_MODE", "options_in_query_mode"),
+        description="How options are folded into the recall query: append | none | rewrite",
+    )
+
+    # Phase 4C — near-duplicate suppression
+    near_dedup_threshold: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("ADAPTER_NEAR_DEDUP_THRESHOLD", "near_dedup_threshold"),
+        description="Token-Jaccard threshold for near-duplicate collapse; 0.0 disables",
     )
 
 
