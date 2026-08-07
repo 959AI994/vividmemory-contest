@@ -106,8 +106,14 @@ def test_recall_include_observations_flag_sets_types_and_prefer(monkeypatch):
     assert call["prefer_observations"] is True
 
 
-def test_recall_include_observations_default_off(monkeypatch):
-    client, fake_vm = _make_app_and_client(monkeypatch, {})
+def test_recall_include_observations_can_be_disabled(monkeypatch):
+    """The 2026-08-07 ship flipped the default to True (see FINAL_REPORT.md);
+    this test verifies the flag still honours an explicit False override so
+    users on the old profile can opt out."""
+    client, fake_vm = _make_app_and_client(
+        monkeypatch,
+        {"recall_include_observations": False},
+    )
     resp = client.post(
         "/search",
         json={"query": "what happened", "user_id": "u1", "top_k": 5},

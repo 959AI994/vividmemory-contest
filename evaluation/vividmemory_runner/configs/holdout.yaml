@@ -1,0 +1,15 @@
+# Holdout config — 5 LoCoMo conversations (~1000 queries) as primary
+# score-ship gate. At N~1000 the ±5pt dev-subset noise band shrinks to
+# roughly ±1.3pp, so a 2–3pp effect resolves cleanly. If the integrated
+# candidate lands ambiguously, expand to the full 10-conv holdout by
+# removing max_conversations.
+adapter_base_url: http://localhost:8000
+top_k: 10
+add_concurrency: 2
+search_concurrency: 8
+request_timeout_seconds: 1200.0
+
+datasets:
+  - name: locomo
+    path: benchmarks/locomo/data/locomo10.json
+    max_conversations: 5

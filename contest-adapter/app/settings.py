@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         description="Internal base URL of vividmemory-api-slim",
     )
     http_timeout_seconds: float = Field(
-        default=300.0,
+        default=1200.0,
         validation_alias=AliasChoices("ADAPTER_HTTP_TIMEOUT_SECONDS", "http_timeout_seconds"),
     )
     include_options_in_query: bool = Field(
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
 
     # Phase 3 — dual retrieval
     recall_include_observations: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("ADAPTER_RECALL_INCLUDE_OBSERVATIONS", "recall_include_observations"),
         description="Ask the engine to include observation-type units in recall",
     )
@@ -78,14 +78,14 @@ class Settings(BaseSettings):
 
     # Phase 4B — options query rewriting
     options_in_query_mode: Literal["append", "none", "rewrite"] = Field(
-        default="append",
+        default="rewrite",
         validation_alias=AliasChoices("ADAPTER_OPTIONS_IN_QUERY_MODE", "options_in_query_mode"),
         description="How options are folded into the recall query: append | none | rewrite",
     )
 
     # Phase 4C — near-duplicate suppression
     near_dedup_threshold: float = Field(
-        default=0.0,
+        default=0.85,
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices("ADAPTER_NEAR_DEDUP_THRESHOLD", "near_dedup_threshold"),
