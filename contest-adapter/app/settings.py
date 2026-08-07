@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         description="Internal base URL of vividmemory-api-slim",
     )
     http_timeout_seconds: float = Field(
-        default=1200.0,
+        default=3600.0,
         validation_alias=AliasChoices("ADAPTER_HTTP_TIMEOUT_SECONDS", "http_timeout_seconds"),
     )
     include_options_in_query: bool = Field(
@@ -43,14 +43,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ADAPTER_PORT", "port"),
     )
 
-    # Phase 1 — per-message retain
+    # Phase 1 — per-message retain (default ON for max retrieval quality)
     per_message_retain: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("ADAPTER_PER_MESSAGE_RETAIN", "per_message_retain"),
         description="Retain each contest message as its own document when true",
     )
     retain_concurrency: int = Field(
-        default=4,
+        default=8,
         ge=1,
         le=32,
         validation_alias=AliasChoices("ADAPTER_RETAIN_CONCURRENCY", "retain_concurrency"),
