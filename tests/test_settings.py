@@ -32,21 +32,22 @@ def _clear_new_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-def test_defaults_ship_the_winning_holdout_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Locks in the 2026-08-07 ship defaults: `include_observations=true`,
-    `options_in_query_mode=rewrite`, `near_dedup_threshold=0.85`. See
-    FINAL_REPORT.md for the +4.10 pp lift these produce on the LoCoMo 5-conv
-    holdout. Flags left at their original defaults stay as-is."""
+def test_defaults_ship_the_max_quality_contest_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Locks in the max-quality contest defaults: per-message retain, dual
+    retrieval, rewrite options, near-dedup 0.85, and a 3600s HTTP timeout.
+    Episode prepend stays off (measured LoCoMo regression)."""
     _clear_new_env(monkeypatch)
+    monkeypatch.delenv("ADAPTER_HTTP_TIMEOUT_SECONDS", raising=False)
     settings = Settings(_env_file=None)
-    assert settings.per_message_retain is False
-    assert settings.retain_concurrency == 4
+    assert settings.per_message_retain is True
+    assert settings.retain_concurrency == 8
     assert settings.recall_include_observations is True
     assert settings.episode_prepend is False
     assert settings.episode_prepend_count == 2
     assert settings.options_in_query_mode == "rewrite"
     assert settings.near_dedup_threshold == 0.85
     assert settings.include_options_in_query is True
+    assert settings.http_timeout_seconds == 3600.0
 
 
 def test_env_var_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
